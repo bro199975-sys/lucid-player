@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lucid Blocks launcher</title>
+<style>
+*{box-sizing:border-box}html,body{height:100%;margin:0;background:#080b10;color:#e7eee9;font:16px system-ui}canvas{display:block;width:100%;height:100%;image-rendering:pixelated;outline:0}#cover{position:fixed;inset:0;display:grid;place-content:center;background:#10151b;padding:24px;overflow:auto}main{width:min(540px,100%);margin:auto}h1{font-size:32px;margin:0 0 12px}p{color:#b8c4c0;line-height:1.5}#drop{display:block;padding:26px 18px;margin:24px 0 12px;border:2px dashed #526a61;border-radius:10px;cursor:pointer;text-align:center}#drop.drag{border-color:#bbf6c9;background:#203229}input{display:block;width:100%;margin-top:16px;font:inherit}button{font:inherit;border:0;border-radius:8px;padding:13px 22px;cursor:pointer;background:#b9f4c2;color:#0e2417}button:disabled{opacity:.4;cursor:default}#play{width:100%;margin-top:12px}#status{white-space:pre-wrap;overflow-wrap:anywhere;min-height:48px;margin:18px 0;color:#c7d7cf}#files{font-size:14px;color:#a0b8aa;overflow-wrap:anywhere}progress{width:100%;height:6px;margin:8px 0}small{display:block;color:#84958d;line-height:1.5}.bar{position:fixed;right:12px;top:12px;z-index:3}.bar button{padding:8px 12px;background:#283b32;color:#dff0e5;font-size:13px}
+</style>
+</head>
+<body>
+<canvas id="canvas" tabindex="0"></canvas>
+<section id="cover"><div class="bar"><button id="fullscreen">Fullscreen</button></div><main>
+<h1>Lucid Blocks</h1>
+<p>Select both game-data parts together, then play. You can also choose the combined game.pcz or merged game ZIP.</p>
+<label id="drop">Choose files or drag them here<input id="pick" type="file" accept=".pcz,.zip,.part1,.part2" multiple></label>
+<div id="files">Lucid_Blocks_Web_Game_Data.pcz.part1 + part2</div>
+<button id="play" disabled>Play</button>
+<progress id="progress" hidden></progress>
+<div id="status" role="status" aria-live="polite">Preparing browser…</div>
+<small>Keyboard and mouse required. This experimental port has graphics differences from desktop. Selected game files are read locally by this launcher.</small>
+</main></section>
+<script src="index.js"></script>
+<script>
+'use strict';
+const EXPECTED_BYTES=655246625;
+const canvas=document.getElementById('canvas'),cover=document.getElementById('cover'),pick=document.getElementById('pick'),drop=document.getElementById('drop'),play=document.getElementById('play'),status=document.getElementById('status'),filesLabel=document.getElementById('files'),progress=document.getElementById('progress');
+let selected=[],setupReady=false,running=false;
+function updateButton(){play.disabled=!setupReady||selected.length===0||running;}
+function choose(list){
+ if(running)return;
+ try{
+  const files=Array.from(list);
+  if(files.length===2){
+   const part=file=>Number((file.name.match(/\.part([12])(?:\s*\(\d+\))?$/i)||[])[1]);
+   files.sort((a,b)=>part(a)-part(b));
+   if(part(files[0])!==1||part(files[1])!==2)throw new Error('Select part1 and part2 together.');
+  }else if(files.length!==1)throw new Error('Choose both data parts, or one combined game.pcz or merged game ZIP.');
+  if(files.reduce((n,file)=>n+file.size,0)!==EXPECTED_BYTES)throw new Error('These files do not match the current game build. Use the latest two Lucid Blocks game-data parts.');
+  selected=files;filesLabel.textContent=files.map(file=>file.name).join(' + ');status.textContent=setupReady?'Ready. Click Play.':'Files selected. Preparing browser…';
+ }catch(error){selected=[];filesLabel.textContent='No valid game files selected.';status.textContent=error.message;}
+ updateButton();
+}
+pick.addEventListener('change',()=>choose(pick.files));
+for(const name of ['dragenter','dragover'])drop.addEventListener(name,event=>{event.preventDefault();drop.classList.add('drag');});
+drop.addEventListener('dragleave',()=>drop.classList.remove('drag'));
+drop.addEventListener('drop',event=>{event.preventDefault();drop.classList.remove('drag');choose(event.dataTransfer.files);});
+document.getElementById('fullscreen').onclick=()=>{
+ const task=document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen();
+ if(task&&task.catch)task.catch(error=>console.warn('Fullscreen unavailable',error));
+};
+function requestMouse(){
+ try{
+  const task=canvas.requestPointerLock();
+  if(task&&task.catch)task.catch(error=>{console.warn(error);offerResume();});
+ }catch(error){console.warn(error);offerResume();}
+}
+function offerResume(){
+ progress.hidden=true;drop.hidden=true;filesLabel.hidden=true;cover.style.display='grid';status.textContent='Click Resume to enable mouse look.';play.textContent='Resume';play.disabled=false;
+ play.onclick=()=>{cover.style.display='none';canvas.focus();requestMouse();};
+}
+function showFailure(error){
+ console.error(error);progress.hidden=true;cover.style.display='grid';status.textContent=String(error&&error.message||error);
+ if(running){play.textContent='Reload launcher';play.disabled=false;play.onclick=()=>location.reload();}else updateButton();
+}
+window.addEventListener('unhandledrejection',event=>{
+ const text=String(event.reason);
+ if(/pointer\s*lock/i.test(text)){event.preventDefault();offerResume();return;}
+ showFailure(event.reason);
+});
+window.addEventListener('error',event=>{if(event.message)showFailure(event.message);});
+async function prepare(){
+ if(window.top!==window.self)throw new Error('Open this GitHub Pages launcher in its own tab using the JSBin Play button.');
+ if(!window.isSecureContext)throw new Error('Open the HTTPS GitHub Pages URL, rather than a downloaded HTML file.');
+ if(!('serviceWorker'in navigator)||typeof DecompressionStream!=='function')throw new Error('Use a recent desktop Chrome browser with service workers enabled.');
+ await navigator.serviceWorker.register('asset-worker.js',{scope:'./',updateViaCache:'none'});
+ await navigator.serviceWorker.ready;
+ if(!navigator.serviceWorker.controller)await new Promise((resolve,reject)=>{
+  const listener=()=>{if(navigator.serviceWorker.controller){clearTimeout(timer);navigator.serviceWorker.removeEventListener('controllerchange',listener);resolve();}};
+  const timer=setTimeout(()=>{navigator.serviceWorker.removeEventListener('controllerchange',listener);reject(new Error('Browser setup timed out. Reload this tab.'));},20000);
+  navigator.serviceWorker.addEventListener('controllerchange',listener);listener();
+ });
+ if(!window.crossOriginIsolated){
+  if(sessionStorage.getItem('lucid-isolation-reload')==='1')throw new Error('Browser isolation is unavailable. Reload once, or check that service workers are allowed.');
+  sessionStorage.setItem('lucid-isolation-reload','1');
+  status.textContent='Preparing engine support. Reloading once…';location.reload();return;
+ }
+ sessionStorage.removeItem('lucid-isolation-reload');
+ setupReady=true;status.textContent=selected.length?'Ready. Click Play.':'Choose both data parts to begin.';updateButton();
+}
+play.onclick=async()=>{
+ if(!setupReady||!selected.length||running)return;
+ play.disabled=true;pick.disabled=true;progress.hidden=false;progress.removeAttribute('value');
+ try{
+  status.textContent='Reading your game files locally…';
+  const first=new Uint8Array(await selected[0].slice(0,4).arrayBuffer());
+  if(first[0]!==80||first[1]!==75||first[2]!==3||first[3]!==4)throw new Error('Game archive header is invalid. Select the current part1 and part2 files.');
+  const engine=new Engine({canvas,executable:'index',gdextensionLibs:['libgdblocks.web.template_release.double.wasm32.wasm'],emscriptenPoolSize:8,canvasResizePolicy:2,focusCanvas:true,args:['--main-pack','game.pcz'],onPrint:console.log,onPrintError:console.error,onExit:code=>showFailure(new Error('Game closed ('+code+'). Reload the launcher to play again.'))});
+  window.gameEngine=engine;
+  const init=engine.init('index');
+  let data=await new Blob(selected).arrayBuffer();
+  await engine.preloadFile(data,'game.pcz');data=null;selected=[];
+  status.textContent='Starting the original game. First load may take a few minutes…';
+  running=true;await init;await engine.start();progress.hidden=true;cover.style.display='none';canvas.focus();
+ }catch(error){pick.disabled=false;showFailure(error);}
+};
+prepare().catch(showFailure);
+</script>
+</body></html>
