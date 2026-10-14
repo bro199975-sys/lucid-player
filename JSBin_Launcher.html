@@ -1,0 +1,2 @@
+<input id="host" type="url" placeholder="https://username.github.io/lucid-player/" size="38">
+<button onclick="try{const u=new window.URL(document.getElementById('host').value);if(u.protocol!=='https:')throw 0;window.open(u.href,'_blank','noopener,noreferrer')}catch(e){alert('Paste your HTTPS GitHub Pages launcher URL first.')} ">Play</button>
